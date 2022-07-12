@@ -1,0 +1,98 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "name" . }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "labels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "labels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ .Values.serviceAccount.name }}
+      initContainers:
+        # chown nexus-data to 'nexus' user and init log directories/files for a new pod
+        # otherwise the side car containers will crash a couple of times and backoff whilst waiting
+        # for nxrm-app to start and this increases the total start up time.
+        - name: init-container
+          image: {{ .Values.deployment.containers.initContainer.repository }}:{{ .Values.deployment.containers.initContainer.tag }}
+          imagePullPolicy: {{ .Values.deployment.containers.pullPolicy }}
+          command: [/bin/sh]
+          args:
+            - -c
+            - >-
+              mkdir -p /nexus-data/etc/logback &&
+              mkdir -p /nexus-data/log/tasks &&
+              mkdir -p /nexus-data/log/audit &&
+              touch -a /nexus-data/log/tasks/allTasks.log &&
+              touch -a /nexus-data/log/audit/audit.log &&
+              touch -a /nexus-data/log/request.log &&
+              chown -R '200:200' /nexus-data
+          volumeMounts:
+            - name: nexusdata
+              mountPath: /nexus-data
+      containers:
+        - name: nxrm
+          image: {{ .Values.deployment.containers.nexus.repository }}:{{ .Values.deployment.containers.nexus.tag }}
+          securityContext:
+            runAsUser: 200
+          imagePullPolicy: {{ .Values.deployment.containers.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.deployment.containers.nexus.port }}
+          env:
+            - name: DB_NAME
+              value: "{{ .Values.deployment.containers.nexus.DB_NAME }}"
+            - name: DB_PASSWORD
+              value: "{{ .Values.deployment.containers.nexus.DB_PASSWORD }}"
+            - name: DB_USER
+              value: "{{ .Values.deployment.containers.nexus.DB_USERNAME }}"
+            - name: DB_HOST
+              value: "{{ .Values.deployment.containers.nexus.DB_HOSTNAME }}"
+            - name: NEXUS_SECURITY_RANDOMPASSWORD
+              value: "true"
+            - name: INSTALL4J_ADD_VM_PARAMS
+              value: "-Xms2703m -Xmx2703m -XX:MaxDirectMemorySize=2703m -Dnexus.licenseFile=/nxrm-secrets/{{ .Values.secrets.license.alias }} \
+                -Dnexus.datastore.enabled=true -Djava.util.prefs.userRoot=${NEXUS_DATA}/javaprefs \
+                -Dnexus.datastore.nexus.jdbcUrl=jdbc:postgresql://${DB_HOST}:{{ .Values.deployment.containers.nexus.env.DB_PORT }}/${DB_NAME} \
+                -Dnexus.datastore.nexus.username=${DB_USER} \
+                -Dnexus.datastore.nexus.password=${DB_PASSWORD}"
+          volumeMounts:
+            - name: nexusdata
+              mountPath: /nexus-data
+            - name: logback-tasklogfile-override
+              mountPath: /nexus-data/etc/logback/logback-tasklogfile-appender-override.xml
+              subPath: logback-tasklogfile-appender-override.xml
+        - name: request-log
+          image: {{ .Values.deployment.containers.requestLog.repository }}:{{ .Values.deployment.containers.requestLog.tag }}
+          args: [/bin/sh, -c, 'tail -n+1 -F /nexus-data/log/request.log']
+          volumeMounts:
+            - name: nexusdata
+              mountPath: /nexus-data
+        - name: audit-log
+          image: {{ .Values.deployment.containers.auditLog.repository }}:{{ .Values.deployment.containers.auditLog.tag }}
+          args: [/bin/sh, -c, 'tail -n+1 -F /nexus-data/log/audit/audit.log']
+          volumeMounts:
+            - name: nexusdata
+              mountPath: /nexus-data
+        - name: tasks-log
+          image: {{ .Values.deployment.containers.taskLog.repository }}:{{ .Values.deployment.containers.taskLog.tag }}
+          args: [/bin/sh, -c, 'tail -n+1 -F /nexus-data/log/tasks/allTasks.log']
+          volumeMounts:
+            - name: nexusdata
+              mountPath: /nexus-data
+      volumes:
+        - name: nexusdata 
+          emptyDir: {}
+        - name: logback-tasklogfile-override
+          configMap:
+            name: {{ include "name" . }}-logback-tasklogfile-override
+            items:
+              - key: logback-tasklogfile-appender-override.xml
+                path: logback-tasklogfile-appender-override.xml

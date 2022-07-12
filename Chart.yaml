@@ -1,0 +1,6 @@
+apiVersion: v2
+name: nxrm3
+description: Helm chart for a Resilient Nexus Repository 3 Pro deployment in AWS
+type: application
+version: 40.1.0
+appVersion: "3.40.1"

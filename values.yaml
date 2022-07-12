@@ -1,0 +1,68 @@
+---
+namespace: nexus
+deployment:
+  name: nxrm
+  containers:
+    pullPolicy: IfNotPresent
+    initContainer:
+      repository: busybox
+      tag: 1.33.1
+    nexus:
+      repository: sonatype/nexus3
+      tag: 3.40.1
+      port: 8081
+      readinessProbe: foo
+      env:
+        DB_NAME: nexus
+        DB_PORT: 5432
+        DB_PASSWORD: foo
+        DB_USERNAME: postgres
+        DB_HOSTNAME: bar
+    requestLog:
+      repository: busybox
+      tag: 1.33.1
+    auditLog:
+      repository: busybox
+      tag: 1.33.1
+    taskLog:
+      repository: busybox
+      tag: 1.33.1
+    postInstall:
+      repository: foo
+      tag: 0.0.1
+
+serviceAccount:
+  roleARN: arn:aws:iam::000000000000:role/nxrm-nexus-role #Role with secretsmanager permissions
+
+ingress:
+  # -- Specifies whether an ingress object should be created.
+  enabled: false
+  # -- Kubernetes ingress annotations to be added.
+  annotations: {}
+    # alb.ingress.kubernetes.io/load-balancer-name: external
+    # alb.ingress.kubernetes.io/scheme: internet-facing
+    # alb.ingress.kubernetes.io/target-type: ip
+    # alb.ingress.kubernetes.io/group.name: external
+    # kubernetes.io/ingress.class: alb
+  # -- Kubernetes ingress object HOST header settings. These settings are used to configure AWS Application Boad Balancer rules.
+  hosts:
+    # -- HOST FQDN to bind this ingress to.
+    - host: chart-example.local
+      paths:
+        # -- HOST header prefix to bind this ingress to.
+        - path: /*
+          # -- Host header path type to bind this ingress to.
+          pathType: Prefix
+
+service:  #Nexus Repo NodePort Service
+  type: NodePort
+  protocol: TCP
+  port: 80
+  targetPort: 8081
+
+secrets:
+  license:
+    arn: arn:aws:secretsmanager:us-east-1:000000000000:secret:nxrm-nexus-license
+    alias: nxrm-license.lic
+  rds:
+    arn: arn:aws:secretsmanager:us-east-1:000000000000:secret:nxrmrds-cred-nexus
